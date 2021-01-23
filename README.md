@@ -21,3 +21,5 @@ Will prune, reset initialization back to epoch 0, and re-train using PGD7
 `python retrain_fast_robust_vgg_eb.py <path to unpruned eb> <prune percentage> <data_folder> <output/log_folder> <dataset: cifar10/cifar100>`
 
 Will prune, reset initialization back to epoch 0, and re-train using FAST FGSM
+
+**TODO**: copy all experiments for resnet-18, add KD training option
