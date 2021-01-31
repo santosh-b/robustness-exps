@@ -186,6 +186,97 @@ class vgg(nn.Module):
                 m.weight.data.normal_(0, 0.01, generator=rng)
                 m.bias.data.zero_()
 
+def prune(model, pct):
+    total = 0
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            total += m.weight.data.shape[0]
+
+    bn = torch.zeros(total)
+    index = 0
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            size = m.weight.data.shape[0]
+            bn[index:(index+size)] = m.weight.data.abs().clone()
+            index += size
+
+    p_flops = 0
+    y, i = torch.sort(bn)
+    # comparsion and permutation (sort process)
+    p_flops += total * np.log2(total) * 3
+    thre_index = int(total * pct)
+    thre = y[thre_index]
+
+    pruned = 0
+    cfg = []
+    cfg_mask = []
+    for k, m in enumerate(model.modules()):
+        if isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d):
+            weight_copy = m.weight.data.abs().clone()
+            mask = weight_copy.gt(thre.cuda()).float().cuda()
+            pruned = pruned + mask.shape[0] - torch.sum(mask)
+            m.weight.data.mul_(mask)
+            m.bias.data.mul_(mask)
+            if int(torch.sum(mask)) > 0:
+                cfg.append(int(torch.sum(mask)))
+            cfg_mask.append(mask.clone())
+            print('layer index: {:d} \t total channel: {:d} \t remaining channel: {:d}'.
+                format(k, mask.shape[0], int(torch.sum(mask))))
+        elif isinstance(m, nn.MaxPool2d):
+            cfg.append('M')
+    return cfg
+
+def resprune(model, pct):
+    total = 0
+
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            total += m.weight.data.shape[0]
+
+    bn = torch.zeros(total)
+    index = 0
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            size = m.weight.data.shape[0]
+            bn[index:(index+size)] = m.weight.data.abs().clone()
+            index += size
+
+    p_flops = 0
+    y, i = torch.sort(bn)
+    p_flops += total * np.log2(total) * 3
+    thre_index = int(total * pct)
+    thre = y[thre_index]
+
+
+    pruned = 0
+    cfg = []
+    cfg_mask = []
+    for k, m in enumerate(model.modules()):
+        if isinstance(m, nn.BatchNorm2d):
+            weight_copy = m.weight.data.abs().clone()
+            mask = weight_copy.gt(thre.cuda()).float().cuda()
+            pruned = pruned + mask.shape[0] - torch.sum(mask)
+            m.weight.data.mul_(mask)
+            m.bias.data.mul_(mask)
+            num = int(torch.sum(mask))
+            if num != 0:
+                cfg.append(num)
+                cfg_mask.append(mask.clone())
+            elif num == 0:
+                cfg.append(1)
+                _mask = mask.clone()
+                _mask[0] = 1
+                cfg_mask.append(_mask)
+            print('layer index: {:d} \t total channel: {:d} \t remaining channel: {:d}'.
+                format(k, mask.shape[0], int(torch.sum(mask))))
+        elif isinstance(m, nn.MaxPool2d):
+            # cfg.append('M')
+            pass
+
+    pruned_ratio = pruned/total
+    #print(pruned_ratio)
+    return cfg
+
 def fix_robustness_ckpt(ckpt):
     state_dict = {}
     try:
@@ -285,6 +376,199 @@ def get_pruned_init(model, cfg, pct, dataset):
             if idx0.size == 1:
                 idx0 = np.resize(idx0, (1,))
             m1.weight.data = m0.weight.data[:, idx0].clone()
+            m1.bias.data = m0.bias.data.clone()
+
+    return modelnew, cfg_mask
+
+def get_resnet_pruned_init(model, cfg, pct, dataset):
+    if dataset == 'cifar10':
+        modelnew = resnet18(seed=0, num_classes=10, cfg=cfg)
+        model.cuda()
+        modelnew.cuda()
+    elif dataset == 'cifar100':
+        modelnew = resnet18(seed=0, num_classes=100, cfg=cfg)
+        model.cuda()
+        modelnew.cuda()
+
+    total = 0
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            total += m.weight.data.shape[0]
+
+    bn = torch.zeros(total)
+    index = 0
+    for m in model.modules():
+        if isinstance(m, nn.BatchNorm2d):
+            size = m.weight.data.shape[0]
+            bn[index:(index+size)] = m.weight.data.abs().clone()
+            index += size
+
+    p_flops = 0
+    y, i = torch.sort(bn)
+    # comparsion and permutation (sort process)
+    p_flops += total * np.log2(total) * 3
+    thre_index = int(total * pct)
+    thre = y[thre_index]
+
+    pruned = 0
+    cfg = []
+    cfg_mask = []
+    for k, m in enumerate(model.modules()):
+        if isinstance(m, nn.BatchNorm2d):
+            weight_copy = m.weight.data.abs().clone()
+            mask = weight_copy.gt(thre.cuda()).float().cuda()
+            pruned = pruned + mask.shape[0] - torch.sum(mask)
+            m.weight.data.mul_(mask)
+            m.bias.data.mul_(mask)
+            num = int(torch.sum(mask))
+            if num != 0:
+                cfg.append(num)
+                cfg_mask.append(mask.clone())
+            elif num == 0:
+                cfg.append(1)
+                _mask = mask.clone()
+                _mask[0] = 1
+                cfg_mask.append(_mask)
+            print('layer index: {:d} \t total channel: {:d} \t remaining channel: {:d}'.
+                format(k, mask.shape[0], int(torch.sum(mask))))
+        elif isinstance(m, nn.MaxPool2d):
+            # cfg.append('M')
+            pass
+
+    if dataset == 'cifar10':
+        model = resnet18(seed=0, num_classes=10)
+    elif dataset == 'cifar100':
+        model = resnet18(seed=0, num_classes=100)
+    model.cuda()
+
+    old_modules = list(model.modules())
+    new_modules = list(modelnew.modules())
+
+    useful_i = []
+    for i, module in enumerate(old_modules):
+        if isinstance(module, nn.Conv2d) or isinstance(module, nn.BatchNorm2d) or isinstance(module, nn.Linear) or isinstance(module, nn.ReLU) or isinstance(module, channel_selection):
+            useful_i.append(i)
+    temp = []
+    for i, item in enumerate(useful_i):
+        temp.append(old_modules[item])
+    # for i, item in enumerate(temp):
+    #     print(i, item)
+    # sys.exit()
+
+    layer_id_in_cfg = 0
+    start_mask = torch.ones(3)
+    end_mask = cfg_mask[layer_id_in_cfg]
+    conv_count = 0
+    bn_count = 0
+    
+    downsample = [8, 13, 18]
+    last_block = [3, 5, 7, 10, 12, 15, 17, 20]
+    for layer_id in range(len(temp)):
+        m0 = old_modules[useful_i[layer_id]]
+        m1 = new_modules[useful_i[layer_id]]
+        # print(m0)
+        if isinstance(m0, nn.BatchNorm2d):
+            bn_count += 1
+            idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+            # print(layer_id_in_cfg, len(cfg_mask))
+            if idx1.size == 1:
+                idx1 = np.resize(idx1,(1,))
+
+            if bn_count == 1:
+                m1.weight.data = m0.weight.data.clone()
+                m1.bias.data = m0.bias.data.clone()
+                m1.running_mean = m0.running_mean.clone()
+                m1.running_var = m0.running_var.clone()
+
+                m2 = new_modules[useful_i[layer_id+2]] # channel selection
+                assert isinstance(m2, channel_selection)
+                m2.indexes.data.zero_()
+                m2.indexes.data[idx1.tolist()] = 1.0
+
+                layer_id_in_cfg += 1
+                start_mask = end_mask.clone()
+                if layer_id_in_cfg < len(cfg_mask):
+                    end_mask = cfg_mask[layer_id_in_cfg]
+
+            elif bn_count in downsample:
+                # If the current layer is the downsample layer, then the current batchnorm 2d layer won't be pruned.
+                m1.weight.data = m0.weight.data.clone()
+                m1.bias.data = m0.bias.data.clone()
+                m1.running_mean = m0.running_mean.clone()
+                m1.running_var = m0.running_var.clone()
+
+            elif bn_count in last_block:
+                # If the current layer is the last conv-bn layer in block, then the current batchnorm 2d layer won't be pruned.
+                m1.weight.data = m0.weight.data.clone()
+                m1.bias.data = m0.bias.data.clone()
+                m1.running_mean = m0.running_mean.clone()
+                m1.running_var = m0.running_var.clone()
+
+                # We need to set the channel selection layer.
+                if bn_count + 1 in downsample:
+                    m2 = new_modules[useful_i[layer_id+3]]
+                    assert isinstance(m2, channel_selection)
+                else:
+                    m2 = new_modules[useful_i[layer_id+1]]
+                    assert isinstance(m2, channel_selection) or isinstance(m2, nn.Linear)
+                if isinstance(m2, channel_selection):
+                    m2.indexes.data.zero_()
+                    m2.indexes.data[idx1.tolist()] = 1.0
+
+                layer_id_in_cfg += 1
+                start_mask = end_mask.clone()
+                if layer_id_in_cfg < len(cfg_mask):
+                    end_mask = cfg_mask[layer_id_in_cfg]
+            else:
+                m1.weight.data = m0.weight.data[idx1.tolist()].clone()
+                m1.bias.data = m0.bias.data[idx1.tolist()].clone()
+                m1.running_mean = m0.running_mean[idx1.tolist()].clone()
+                m1.running_var = m0.running_var[idx1.tolist()].clone()
+                layer_id_in_cfg += 1
+                start_mask = end_mask.clone()
+                if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
+                    end_mask = cfg_mask[layer_id_in_cfg]
+        elif isinstance(m0, nn.Conv2d):
+            conv_count += 1
+            if conv_count == 1:
+                m1.weight.data = m0.weight.data.clone()
+                continue
+            elif conv_count in downsample: # downsample
+                # We need to consider the case where there are downsampling convolutions.
+                # For these convolutions, we just copy the weights.
+                m1.weight.data = m0.weight.data.clone()
+                continue
+            elif conv_count in last_block:
+                # the last convolution in the residual block.
+                idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
+                idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+                print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                if idx1.size == 1:
+                    idx1 = np.resize(idx1, (1,))
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                m1.weight.data = w1.clone()
+                continue
+            else:
+                idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
+                idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+                print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                if idx1.size == 1:
+                    idx1 = np.resize(idx1, (1,))
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                w1 = w1[idx1.tolist(), :, :, :].clone()
+                m1.weight.data = w1.clone()
+        elif isinstance(m0, nn.Linear):
+            # end_mask = cfg_mask[-1]
+            # idx0 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+            # print(idx0)
+            # if idx0.size == 1:
+            #     idx0 = np.resize(idx0, (1,))
+            # m1.weight.data = m0.weight.data[:, idx0].clone()
+            m1.weight.data = m0.weight.data.clone()
             m1.bias.data = m0.bias.data.clone()
 
     return modelnew, cfg_mask
