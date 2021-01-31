@@ -71,4 +71,4 @@ def log_retrain(model, log_info):
                 str(log_info['train_loss'])+'\n')
 train_args.epoch_hook = log_retrain
 
-train.train_model(train_args, m, (train_loader, val_loader), store=o
+train.train_model(train_args, m, (train_loader, val_loader), store=out_store)
