@@ -22,4 +22,4 @@ Will prune, reset initialization back to epoch 0, and re-train using PGD7
 
 Will prune, reset initialization back to epoch 0, and re-train using FAST FGSM
 
-**TODO**: copy all experiments for resnet-18, add KD training option
+**TODO**: copy all experiments for resnet-18
