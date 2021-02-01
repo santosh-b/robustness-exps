@@ -98,14 +98,14 @@ def get_loaders(dir_, batch_size, dataset):
         return train_loader, test_loader
 
 
-def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, opt=None):
+def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts,  ds, opt=None):
     max_loss = torch.zeros(y.shape[0]).cuda()
     max_delta = torch.zeros_like(X).cuda()
     for zz in range(restarts):
         delta = torch.zeros_like(X).cuda()
         for i in range(len(epsilon)):
             delta[:, i, :, :].uniform_(-epsilon[i][0][0].item(), epsilon[i][0][0].item())
-        delta.data = clamp(delta, lower_limit - X, upper_limit - X)
+        delta.data = clamp(delta, lower_limit(ds) - X, upper_limit(ds) - X)
         delta.requires_grad = True
         for _ in range(attack_iters):
             output = model(X + delta)
@@ -122,7 +122,7 @@ def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, opt=None):
             d = delta[index[0], :, :, :]
             g = grad[index[0], :, :, :]
             d = clamp(d + alpha * torch.sign(g), -epsilon, epsilon)
-            d = clamp(d, lower_limit - X[index[0], :, :, :], upper_limit - X[index[0], :, :, :])
+            d = clamp(d, lower_limit(ds) - X[index[0], :, :, :], upper_limit(ds) - X[index[0], :, :, :])
             delta.data[index[0], :, :, :] = d
             delta.grad.zero_()
         all_loss = F.cross_entropy(model(X+delta), y, reduction='none').detach()
@@ -131,16 +131,16 @@ def attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, opt=None):
     return max_delta
 
 
-def evaluate_pgd(test_loader, model, attack_iters, restarts):
-    epsilon = (8 / 255.) / std
-    alpha = (2 / 255.) / std
+def evaluate_pgd(test_loader, model, attack_iters, restarts, dataset):
+    epsilon = (8 / 255.) / std(dataset)
+    alpha = (2 / 255.) / std(dataset)
     pgd_loss = 0
     pgd_acc = 0
     n = 0
     model.eval()
     for i, (X, y) in enumerate(test_loader):
         X, y = X.cuda(), y.cuda()
-        pgd_delta = attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts)
+        pgd_delta = attack_pgd(model, X, y, epsilon, alpha, attack_iters, restarts, dataset)
         with torch.no_grad():
             output = model(X + pgd_delta)
             loss = F.cross_entropy(output, y)
