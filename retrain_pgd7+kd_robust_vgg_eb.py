@@ -61,7 +61,7 @@ elif dataset == 'cifar100':
     model = vgg(16, dataset='cifar100', seed=0)
     model.load_state_dict(weight_before_prune, strict=False)
     # teacher is the unpruned EB Ticket
-    teacher = vgg(16, seed=0)
+    teacher = vgg(16, dataset='cifar100', seed=0)
     teacher.load_state_dict(weight_before_prune, strict=False)
     teacher.cuda()
 
