@@ -30,6 +30,7 @@ train_args = Parameters({
     'attack_lr': 2/255,
     'attack_steps': 7,
     'epochs': 110,
+    'lr': 1,
     'save_ckpt_iters': 110,
     'weight_decay':5e-4,
     'data_aug': 0,
