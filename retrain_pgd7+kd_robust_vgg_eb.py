@@ -150,6 +150,7 @@ train_args = Parameters({
     'weight_decay':5e-4,
     'data_aug': 1,
     'log_iters': 1,
+    'lr': 1,
     'mixed_precision':0,
     'custom_lr_multiplier': '[(0,.1),(100,.01),(105,.001)]'
 })
